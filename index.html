@@ -9,10 +9,12 @@
 body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#f0f2f5;max-width:480px;margin:0 auto;min-height:100vh}
 button{cursor:pointer;font-family:inherit}
 input,textarea,select{font-family:inherit;outline:none}
+@keyframes sbPulse{0%,80%,100%{transform:scale(0);opacity:.4}40%{transform:scale(1);opacity:1}}
+.sb-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.7);animation:sbPulse 1.4s ease-in-out infinite}
 </style>
 </head>
 <body>
-<div id="root">Cargando aplicación y enlazando con base de datos central...</div>
+<div id="root">Cargando...</div>
 
 <script type="application/json" id="proto-data">
 {"_v":"base","zonesConfig":[
@@ -66,7 +68,7 @@ input,textarea,select{font-family:inherit;outline:none}
 {"id":43,"num":43,"n":"CC LT Felipe Estrada Saa","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":44,"num":44,"n":"CC LT Paul Hudson Gómez","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":45,"num":45,"n":"CC LT Sergio Benítez Prado","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
-		{"id": 46, "num": 46, "n": "CC LT Camila Ovalle Lagos", "ok": true, "ac": false, "delegacion": false, "reservado": false, "obs": ""},
+{"id":46,"num":46,"n":"CC LT Camila Ovalle Lagos","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":47,"num":47,"n":"CC OM Raúl Vargas Sandoval","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":48,"num":48,"n":"CC LT José Egaña Cerda","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":49,"num":49,"n":"CC Sebastián Vargas Rodríguez","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
@@ -86,26 +88,23 @@ input,textarea,select{font-family:inherit;outline:none}
 <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
 
 <script type="text/babel">
-const {useState,useEffect,useMemo}=React;
-const PIN="2105", LS="proto_21m26_final2";
-
-/* ── CONFIGURACIÓN CENTRALIZADA DE SUPABASE ── */
-const SUPABASE_URL = "https://xukguiohfabhcfxzhwmi.supabase.co"; 
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1a2d1aW9oZmFiaGNmeHpod21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyODQ1NzQsImV4cCI6MjA5NDg2MDU3NH0.mtcPHs4S7vSkWDYjeQFo_FedkDrYNcrHOm3_Xz4zLg8";
-const ROW_ID = "misa_21_mayo";
-
-const supabaseHeaders = {
-  "apikey": SUPABASE_ANON_KEY,
-  "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-  "Content-Type": "application/json"
+const {useState,useEffect,useMemo,useRef}=React;
+const PIN="2105";
+/* ── SUPABASE ────────────────────────────────────────────────── */
+const SUPABASE_URL="https://xukguiohfabhcfxzhwmi.supabase.co";
+const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1a2d1aW9oZmFiaGNmeHpod21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyODQ1NzQsImV4cCI6MjA5NDg2MDU3NH0.mtcPHs4S7vSkWDYjeQFo_FedkDrYNcrHOm3_Xz4zLg8";
+const ROW_ID="misa_21_mayo";
+const supabaseHeaders={
+  "apikey":SUPABASE_ANON_KEY,
+  "Authorization":`Bearer ${SUPABASE_ANON_KEY}`,
+  "Content-Type":"application/json"
 };
-
 /* Capturar fuentes originales antes de que Babel compile nada */
 const _JSX_SRC=(document.querySelector("script[type='text/babel']")||{}).textContent||"";
 const _CSS_SRC=(document.querySelector("style")||{}).textContent||"";
 const _TITLE=(document.querySelector("title")||{}).textContent||"Protocolo";
 
-/* ── zonesConfig global ─────────────── */
+/* ── zonesConfig global (actualizado desde App) ─────────────── */
 let gZones=[];
 
 /* ── ZONAS POR DEFECTO ──────────────────────────────────────── */
@@ -118,6 +117,8 @@ const DEFAULT_ZONES=[
 
 /* ── UBICACIÓN FÍSICA ───────────────────────────────────────── */
 function getPhys(num){
+  /* Calcula fila, grupo y asiento desde el número de protocolo.
+     Fila 1 siempre vacía → los asientos empiezan en fila 2. */
   const ri=Math.floor((num-1)/16), rn=ri+2;
   const pi=(num-1)%16;
   const gr=pi%2===0?"A":"B";
@@ -143,14 +144,61 @@ function getLoc(inv){
 function getConjLoc(num){return getLoc({num:num+2,delegacion:false,reservado:false});}
 const norm=s=>(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
 
+/* ── DATOS ─────────────────────────────────────────────────── */
 let gData=[];
 
-/* ── APP COMPONENT ─────────────────────────────────────────── */
-function App(){
-  const [items, setItems] = useState([]);
-  const [zones, setZones] = useState(DEFAULT_ZONES);
-  const [loading, setLoading] = useState(true);
+/* Datos embebidos estáticos (fallback offline) */
+function getEmbedded(){
+  const d=JSON.parse(document.getElementById("proto-data").textContent);
+  return{items:d.items||[],zones:d.zonesConfig||DEFAULT_ZONES};
+}
+function exportHTML(){
+  try{
+    const payload=JSON.stringify({_v:"exp_"+Date.now(),zonesConfig:gZones,items:gData});
+    // Reconstruir el HTML desde los componentes originales capturados al inicio.
+    // NO se usa document.documentElement.outerHTML porque Babel añade scripts
+    // compilados extra que rompen el archivo exportado.
+    const sc="<"+"script", esc="<"+"/"+"script"+">";
+    const lines=[
+      "<!DOCTYPE html>",
+      '<html lang="es">',
+      "<head>",
+      '<meta charset="UTF-8">',
+      '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">',
+      "<title>"+_TITLE+"</title>",
+      "<style>"+_CSS_SRC+"</style>",
+      "</head>",
+      "<body>",
+      '<div id="root">Cargando...</div>',
+      sc+' type="application/json" id="proto-data">\n'+payload+"\n"+esc,
+      sc+' src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js">'+esc,
+      sc+' src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js">'+esc,
+      sc+' src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js">'+esc,
+      sc+' type="text/babel">\n'+_JSX_SRC+"\n"+esc,
+      "</body>",
+      "</html>"
+    ];
+    const exportedHtml=lines.join("\n");
+    const blob=new Blob([exportedHtml],{type:"text/html;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download="Protocolo_Misa_21Mayo_2026.html";
+    document.body.appendChild(a);a.click();
+    setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+  }catch(e){
+    alert("Error al exportar: "+e.message);
+    console.error("exportHTML error:",e);
+  }
+}
 
+/* ── APP ────────────────────────────────────────────────────── */
+function App(){
+  /* Estado inicial vacío — se carga desde Supabase en useEffect */
+  const[items,setItems]=useState([]);
+  const[zones,setZones]=useState(DEFAULT_ZONES);
+  const[loading,setLoading]=useState(true);
+  const[cloudErr,setCloudErr]=useState(false);
   const[tab,setTab]=useState("consultar");
   const[q,setQ]=useState("");
   const[sel,setSel]=useState(null);
@@ -158,9 +206,6 @@ function App(){
   const[auth,setAuth]=useState(false);
   const[pinErr,setPinErr]=useState(false);
   const[saved,setSaved]=useState("");
-  
-  // Estado corregido para desambiguar editId de la función setEditId
-  const[editIdState, setEditIdState]=useState(null);
   const[addMode,setAddMode]=useState(false);
   const[importMode,setImportMode]=useState(false);
   const[configMode,setConfigMode]=useState(false);
@@ -168,86 +213,79 @@ function App(){
   const[showRes,setShowRes]=useState(false);
   const[newRec,setNewRec]=useState({num:"",n:"",ok:false,ac:false,delegacion:false,reservado:false,obs:""});
   const[zonesEdit,setZonesEdit]=useState(null);
+  /* Ref para guardar el PIN autenticado sin exponerlo en estado */
+  const authPinRef=useRef("");
 
+  /* ── CARGA INICIAL desde Supabase ─────────────────────────── */
+  useEffect(()=>{
+    (async()=>{
+      setLoading(true);setCloudErr(false);
+      try{
+        const res=await fetch(
+          `${SUPABASE_URL}/rest/v1/protocolo_data?id=eq.${ROW_ID}&select=items,zones_config`,
+          {headers:supabaseHeaders}
+        );
+        if(res.ok){
+          const data=await res.json();
+          if(data&&data.length>0&&data[0].items){
+            const row=data[0];
+            const li=row.items;
+            const lz=row.zones_config||DEFAULT_ZONES;
+            setItems(li);setZones(lz);gData=li;gZones=lz;
+            setLoading(false);return;
+          }
+        }
+        throw new Error("Sin datos en la nube");
+      }catch(e){
+        console.warn("Supabase fetch — usando datos embebidos:",e.message);
+        const{items:fi,zones:fz}=getEmbedded();
+        setItems(fi);setZones(fz);gData=fi;gZones=fz;
+        setCloudErr(true);
+      }finally{setLoading(false);}
+    })();
+  },[]);
+
+  /* Sincronizar globales cuando cambia el estado */
   useEffect(()=>{gData=items;gZones=zones;},[items,zones]);
 
-  /* ── SCONEXIÓN EN TIEMPO REAL CON SUPABASE ── */
-  useEffect(() => {
-    async function loadFromCloud() {
-      try {
-        const response = await fetch(`${SUPABASE_URL}/rest/v1/protocolo_data?id=eq.${ROW_ID}&select=items,zones_config`, {
-          method: "GET",
-          headers: supabaseHeaders
-        });
-        if(!response.ok) throw new Error("Fallo de red de API");
-        const data = await response.json();
-        
-        if(data && data.length > 0 && data[0].items && data[0].items.length > 0) {
-          setItems(data[0].items);
-          setZones(data[0].zones_config || DEFAULT_ZONES);
-        } else {
-          const emb = JSON.parse(document.getElementById("proto-data").textContent);
-          setItems(emb.items);
-          setZones(emb.zonesConfig || DEFAULT_ZONES);
-        }
-      } catch (e) {
-        console.error("Modo local activado por desconexión:", e);
-        const emb = JSON.parse(document.getElementById("proto-data").textContent);
-        setItems(emb.items);
-        setZones(emb.zonesConfig || DEFAULT_ZONES);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadFromCloud();
-  }, []);
-
-  /* ── PERSISTENCIA CENTRALIZADA CON CONTROL DE PIN EN SERVIDOR ── */
-  const persist = async (newItems, newZones) => {
-    const ni = newItems !== undefined ? newItems : items;
-    const nz = newZones !== undefined ? newZones : zones;
-    
-    const sorted = [
-      ...ni.filter(x => !x.delegacion).sort((a, b) => a.num - b.num),
-      ...ni.filter(x => x.delegacion).sort((a, b) => a.n.localeCompare(b.n))
-    ];
-    
-    setItems(sorted);
-    gData = sorted;
-    if (newZones !== undefined) { setZones(nz); gZones = nz; }
-
-    if (!auth) {
-      setSaved("✓ Guardado Local");
-      setTimeout(() => setSaved(""), 2000);
+  /* ── PERSIST: optimista local + RPC Supabase ──────────────── */
+  const persist=(newItems,newZones)=>{
+    const ni=newItems!==undefined?newItems:items;
+    const nz=newZones!==undefined?newZones:zones;
+    const sorted=[...ni.filter(x=>!x.delegacion).sort((a,b)=>a.num-b.num),
+                  ...ni.filter(x=>x.delegacion).sort((a,b)=>a.n.localeCompare(b.n))];
+    /* Actualización optimista inmediata */
+    setItems(sorted);gData=sorted;
+    if(newZones!==undefined){setZones(nz);gZones=nz;}
+    /* Sin autenticación → solo memoria */
+    if(!auth){
+      setSaved("⚠ Solo en memoria local");
+      setTimeout(()=>setSaved(""),3000);
       return;
     }
-
-    try {
-      setSaved("⏳ Sincronizando...");
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/update_protocolo_secure`, {
-        method: "POST",
-        headers: supabaseHeaders,
-        body: JSON.stringify({
-          target_id: ROW_ID,
-          new_items: sorted,
-          new_zones: nz,
-          input_pin: pin 
-        })
-      });
-
-      if (response.ok) {
-        setSaved("✓ Nube Sincronizada");
-      } else {
-        setSaved("⚠️ Error de PIN");
-      }
-    } catch (err) {
-      setSaved("⚠️ Error de Red");
-    }
-    setTimeout(() => setSaved(""), 2500);
+    /* Con autenticación → guardar en Supabase vía RPC segura */
+    const finalZones=newZones!==undefined?nz:zones;
+    setSaved("☁ Guardando...");
+    fetch(`${SUPABASE_URL}/rest/v1/rpc/update_protocolo_secure`,{
+      method:"POST",
+      headers:supabaseHeaders,
+      body:JSON.stringify({
+        target_id:ROW_ID,
+        new_items:sorted,
+        new_zones:finalZones,
+        input_pin:authPinRef.current
+      })
+    })
+    .then(r=>{
+      if(!r.ok)return r.text().then(t=>{throw new Error(`HTTP ${r.status}: ${t}`);});
+      setSaved("✓ Guardado en nube");
+    })
+    .catch(e=>{
+      console.error("Supabase RPC error:",e);
+      setSaved("⚠ Error al sincronizar");
+    })
+    .finally(()=>setTimeout(()=>setSaved(""),3500));
   };
-
-  const setEditId = (val) => setEditIdState(val);
-  const editId = editIdState;
 
   const results=useMemo(()=>{
     if(!q||q.length<2)return[];
@@ -264,7 +302,13 @@ function App(){
 
   const reservados=useMemo(()=>items.filter(d=>d.reservado),[items]);
 
-  const doLogin=()=>{if(pin===PIN){setAuth(true);setPinErr(false);}else setPinErr(true);setPin("");};
+  const doLogin=()=>{
+    if(pin===PIN){
+      authPinRef.current=pin; /* Guardar para RPC sin re-exponer en estado */
+      setAuth(true);setPinErr(false);
+    }else{setPinErr(true);}
+    setPin("");
+  };
   const toggleF=(id,f)=>persist(items.map(d=>d.id===id?{...d,[f]:!d[f]}:d));
   const delRec=(id)=>{if(confirm("¿Eliminar?"))persist(items.filter(d=>d.id!==id));};
 
@@ -301,48 +345,21 @@ function App(){
     setConfigMode(false);setZonesEdit(null);
   };
 
-  function exportHTMLlocal(){
-    try{
-      const payload=JSON.stringify({_v:"exp_"+Date.now(),zonesConfig:zones,items:items});
-      const sc="<"+"script", esc="<"+"/"+"script"+">";
-      const lines=[
-        "<!DOCTYPE html>",
-        '<html lang="es">',
-        "<head>",
-        '<meta charset="UTF-8">',
-        '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">',
-        "<title>"+_TITLE+"</title>",
-        "<style>"+_CSS_SRC+"</style>",
-        "</head>",
-        "<body>",
-        '<div id="root">Cargando...</div>',
-        sc+' type="application/json" id="proto-data">\n'+payload+"\n"+esc,
-        sc+' src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js">'+esc,
-        sc+' src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js">'+esc,
-        sc+' src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js">'+esc,
-        sc+' type="text/babel">\n'+_JSX_SRC+"\n"+esc,
-        "</body>",
-        "</html>"
-      ];
-      const exportedHtml=lines.join("\n");
-      const blob=new Blob([exportedHtml],{type:"text/html;charset=utf-8"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");
-      a.href=url;
-      a.download="Protocolo_Misa_21Mayo_2026.html";
-      document.body.appendChild(a);a.click();
-      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
-    }catch(e){
-      alert("Error al exportar: "+e.message);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div style={{fontFamily:"system-ui,sans-serif",maxWidth:480,margin:"100px auto",textAlign:"center",color:"#0a1f3d"}}>
-        <div style={{fontSize:40,marginBottom:20}}>⚓</div>
-        <div style={{fontSize:16,fontWeight:500}}>Cargando Estructura de Protocolo...</div>
-        <div style={{fontSize:12,color:"#6b7280",marginTop:8}}>Sincronizando con base de datos en Supabase</div>
+  /* ── PANTALLA DE CARGA ──────────────────────────────────────── */
+  if(loading){
+    return(
+      <div style={{minHeight:"100vh",background:"#0a1f3d",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",color:"white",fontFamily:"system-ui,-apple-system,sans-serif",padding:24}}>
+        <div style={{fontSize:52,marginBottom:20}}>⚓</div>
+        <div style={{fontSize:17,fontWeight:600,letterSpacing:".04em",marginBottom:6}}>PROTOCOLO — 21 MAY 2026</div>
+        <div style={{fontSize:12,opacity:.55,marginBottom:28,textAlign:"center",lineHeight:1.6}}>
+          MISA ACCIÓN DE GRACIAS · ARMADA DE CHILE<br/>Sincronizando base de datos...
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:32}}>
+          <div className="sb-dot" style={{animationDelay:"0s"}}/>
+          <div className="sb-dot" style={{animationDelay:".2s"}}/>
+          <div className="sb-dot" style={{animationDelay:".4s"}}/>
+        </div>
+        <div style={{fontSize:11,opacity:.35}}>Conectando con Supabase...</div>
       </div>
     );
   }
@@ -353,6 +370,7 @@ function App(){
         <div style={{fontSize:17,fontWeight:500,letterSpacing:".05em"}}>⚓ PROTOCOLO — 21 MAY 2026</div>
         <div style={{fontSize:11,opacity:.6,marginTop:2}}>MISA ACCIÓN DE GRACIAS · ARMADA DE CHILE · BASETALC</div>
         {saved&&<div style={{position:"absolute",right:10,top:10,fontSize:11,background:"rgba(255,255,255,.2)",borderRadius:5,padding:"2px 8px"}}>{saved}</div>}
+        {cloudErr&&!saved&&<div style={{position:"absolute",left:10,top:10,fontSize:10,background:"rgba(255,165,0,.25)",borderRadius:5,padding:"2px 7px",color:"#fde68a"}}>⚠ Modo offline</div>}
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",background:"#fff",borderBottom:".5px solid #e5e7eb"}}>
@@ -385,7 +403,7 @@ function App(){
             {pinErr&&<div style={{color:"#A32D2D",fontSize:13,marginTop:8}}>PIN incorrecto</div>}
           </div>
         ):(
-          <Admin items={items} zones={zones} persist={persist} toggleF={toggleF} delRec={delRec} editId={editId} setEditId={setEditId} addMode={addMode} setAddMode={setAddMode} importMode={importMode} setImportMode={setImportMode} configMode={configMode} setConfigMode={setConfigMode} importTxt={importTxt} setImportTxt={setImportTxt} handleImport={handleImport} newRec={newRec} setNewRec={setNewRec} addRecord={addRecord} setAuth={setAuth} zonesEdit={zonesEdit} setZonesEdit={setZonesEdit} saveZones={saveZones} exportHTML={exportHTMLlocal} resetData={()=>{if(confirm("¿Restaurar datos de referencia?")){{const d=JSON.parse(document.getElementById("proto-data").textContent);persist(d.items,d.zonesConfig||DEFAULT_ZONES);}}}}/>
+          <Admin items={items} zones={zones} persist={persist} toggleF={toggleF} delRec={delRec} addMode={addMode} setAddMode={setAddMode} importMode={importMode} setImportMode={setImportMode} configMode={configMode} setConfigMode={setConfigMode} importTxt={importTxt} setImportTxt={setImportTxt} handleImport={handleImport} newRec={newRec} setNewRec={setNewRec} addRecord={addRecord} setAuth={setAuth} zonesEdit={zonesEdit} setZonesEdit={setZonesEdit} saveZones={saveZones} resetData={()=>{if(confirm("¿Restaurar datos de referencia?")){{const d=JSON.parse(document.getElementById("proto-data").textContent);persist(d.items,d.zonesConfig||DEFAULT_ZONES);}}}}/>
         ))}
       </div>
     </div>
@@ -486,6 +504,7 @@ function Tarjeta({inv,items,onBack,showBack}){
     <div style={{marginTop:12}}>
       {showBack&&<button onClick={onBack} style={{background:"none",border:"none",fontSize:13,color:"#6b7280",padding:"0 0 8px",display:"flex",alignItems:"center",gap:4}}>← Volver</button>}
 
+      {/* RESERVADO */}
       {(l.isRes||inv.reservado)&&(
         <div style={{background:"#fef2f2",border:"1.5px solid #A32D2D",borderRadius:12,padding:16}}>
           <div style={{textAlign:"center",marginBottom:12}}><span style={{fontSize:28}}>🔒</span><div style={{fontSize:14,fontWeight:700,color:"#A32D2D",marginTop:4}}>ASIENTO RESERVADO</div></div>
@@ -496,6 +515,7 @@ function Tarjeta({inv,items,onBack,showBack}){
         </div>
       )}
 
+      {/* VIP */}
       {l.isVip&&!l.isRes&&!inv.reservado&&(
         <div style={{background:"#fff",border:"1.5px solid #B8860B",borderRadius:12,padding:16}}>
           <div style={{textAlign:"center",marginBottom:12}}><span style={{fontSize:30,color:"#B8860B"}}>★</span><span style={{marginLeft:8,fontSize:14,fontWeight:500,color:"#B8860B",verticalAlign:"middle"}}>AUTORIDAD VIP</span></div>
@@ -517,6 +537,7 @@ function Tarjeta({inv,items,onBack,showBack}){
         </div>
       )}
 
+      {/* DELEGACIÓN */}
       {l.type==="delegacion"&&(
         <div style={{background:"#fff",border:`.5px solid ${zone.c}`,borderRadius:12,padding:16}}>
           <div style={{textAlign:"center",marginBottom:12,background:zone.bg,borderRadius:10,padding:10}}>
@@ -531,6 +552,7 @@ function Tarjeta({inv,items,onBack,showBack}){
         </div>
       )}
 
+      {/* ZONA */}
       {l.type==="normal"&&!l.isVip&&!l.isRes&&!inv.reservado&&(
         <div style={{background:"#fff",border:`.5px solid ${zone.c}`,borderRadius:12,padding:16}}>
           <div style={{fontSize:18,fontWeight:500,color:"#111",marginBottom:14}}>{inv.n}</div>
@@ -599,6 +621,7 @@ function Mapa({items,zones}){
           <div style={{width:10}}/>
           <div style={{flex:1,textAlign:"center",fontSize:10,fontWeight:700,color:"#374151",background:"#f0f4f8",borderRadius:4,padding:"3px 0"}}>GRUPO B · Derecha</div>
         </div>
+        {/* Fila 1 vacía */}
         <div style={{display:"flex",alignItems:"center",gap:3,marginBottom:3}}>
           <div style={{fontSize:8,width:20,textAlign:"right",color:"#9ca3af",flexShrink:0}}>F1</div>
           <div style={{flex:1,height:12,borderRadius:"2px 0 0 2px",background:"repeating-linear-gradient(45deg,#f9f9f9,#f9f9f9 2px,#eee 2px,#eee 4px)",border:".5px dashed #d1d5db",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:7,color:"#9ca3af"}}>bloqueada</span></div>
@@ -606,10 +629,12 @@ function Mapa({items,zones}){
           <div style={{flex:1,height:12,borderRadius:"0 2px 2px 0",background:"repeating-linear-gradient(45deg,#f9f9f9,#f9f9f9 2px,#eee 2px,#eee 4px)",border:".5px dashed #d1d5db"}}/>
           <div style={{width:28}}/>
         </div>
+        {/* Filas 2-16 */}
         {[2,3,4,5,6,7,8,9,10,11,12,13,14,15,16].map(rn=>{
           const midProto=(rn-2)*16+8;
           const z=getZoneFor(midProto);
           const isVip=z?.vip;
+          const lastInGrp=rn===Math.round((zones.findIndex(zz=>zz===z)*4+2+Math.min(zz=>zz===z,4)*4));
           return(
             <div key={rn} style={{display:"flex",alignItems:"center",gap:3,marginBottom:2}}>
               <div style={{fontSize:8,width:20,textAlign:"right",color:z?.c||"#9ca3af",flexShrink:0,fontWeight:500}}>F{rn}</div>
@@ -654,6 +679,7 @@ function Mapa({items,zones}){
         <div style={{textAlign:"center",fontSize:11,color:"#9ca3af",marginTop:8}}>🚪 ENTRADA</div>
       </div>
 
+      {/* Leyenda dinámica */}
       <div style={{fontSize:11,fontWeight:500,color:"#6b7280",marginBottom:8}}>ZONAS CONFIGURADAS</div>
       {zones.map((z,i)=>{
         const desde=i===0?1:(zones[i-1].hasta+1);
@@ -670,16 +696,29 @@ function Mapa({items,zones}){
           </div>
         );
       })}
+      <div style={{marginTop:10,background:"#f9fafb",border:".5px solid #e5e7eb",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#6b7280",lineHeight:1.7}}>
+        <div><strong>Fila 1:</strong> Bloqueada — para arrodillarse durante la misa.</div>
+        <div><strong>Grupo A</strong> = izquierda · <strong>Grupo B</strong> = derecha (mirando al altar).</div>
+        <div><strong>Asiento 1</strong> = junto al pasillo · <strong>Asiento 8</strong> = junto a la pared.</div>
+        <div>Los límites de zona se ajustan desde Admin → Configurar grupos.</div>
+      </div>
     </div>
   );
 }
 
 /* ── ADMIN ──────────────────────────────────────────────────── */
-function Admin({items,zones,persist,toggleF,delRec,editId,setEditId,addMode,setAddMode,importMode,setImportMode,configMode,setConfigMode,importTxt,setImportTxt,handleImport,newRec,setNewRec,addRecord,setAuth,zonesEdit,setZonesEdit,saveZones,exportHTML,resetData}){
+function Admin({items,zones,persist,toggleF,delRec,addMode,setAddMode,importMode,setImportMode,configMode,setConfigMode,importTxt,setImportTxt,handleImport,newRec,setNewRec,addRecord,setAuth,zonesEdit,setZonesEdit,saveZones,resetData}){
+  /* Punto 4: estado propio para editId — evita conflictos de scope con props */
+  const[editIdState,setEditIdState]=useState(null);
+  /* Alias de compatibilidad para SecLista (mantiene interfaz editId/setEditId) */
+  const editId=editIdState;
+  const setEditId=setEditIdState;
+
   const res=items.filter(d=>d.reservado);
   const vips=items.filter(d=>!d.delegacion&&!d.reservado&&getLoc(d).isVip);
   const zones_items=items.filter(d=>!d.delegacion&&!d.reservado&&!getLoc(d).isVip&&d.num>0);
   const deleg=items.filter(d=>d.delegacion);
+
   const openConfig=()=>{setZonesEdit(zones.map(z=>({...z})));setConfigMode(true);setAddMode(false);setImportMode(false);};
 
   return(
@@ -688,10 +727,10 @@ function Admin({items,zones,persist,toggleF,delRec,editId,setEditId,addMode,setA
         <div style={{fontSize:14,fontWeight:500}}>Administración</div>
         <button onClick={()=>setAuth(false)} style={{fontSize:12,padding:"4px 10px",background:"#fff",border:".5px solid #d1d5db",borderRadius:7}}>Salir</button>
       </div>
-      <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>T1 AB Jonathan Castro Ruiz · Oficial de Protocolo</div>
+      <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>T1 AB Jonathan Castro Ruiz · Oficial de Protocolo · {items.length} registros</div>
 
       <button onClick={exportHTML} style={{width:"100%",padding:"11px",background:"#0a1f3d",color:"white",border:"none",borderRadius:8,fontSize:13,marginBottom:8,fontWeight:500}}>
-        ⬇ Exportar Copia HTML Local de Respaldo
+        ⬇ Exportar HTML actualizado para WhatsApp
       </button>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:10}}>
@@ -700,25 +739,53 @@ function Admin({items,zones,persist,toggleF,delRec,editId,setEditId,addMode,setA
         <button onClick={openConfig} style={{padding:"9px 6px",border:".5px solid #185FA5",borderRadius:8,fontSize:12,display:"flex",alignItems:"center",justifyContent:"center",gap:4,background:"#EEF4FF",color:"#185FA5",fontWeight:500}}>⚙ Grupos</button>
       </div>
 
+      {/* ── CONFIGURAR GRUPOS ── */}
       {configMode&&zonesEdit&&(
         <div style={{background:"#EEF4FF",border:"1px solid #185FA5",borderRadius:10,padding:14,marginBottom:12}}>
           <div style={{fontSize:13,fontWeight:600,color:"#185FA5",marginBottom:4}}>⚙ Configurar límites de grupos</div>
+          <div style={{fontSize:11,color:"#374151",marginBottom:12,lineHeight:1.5}}>
+            Define hasta qué N° de protocolo llega cada grupo. El sistema asigna la zona automáticamente.<br/>
+            El último grupo no tiene límite (llega hasta el fin del listado).
+          </div>
           {zonesEdit.map((z,i)=>{
             const desde=i===0?1:(zonesEdit[i-1].hasta+1);
             const isLast=i===zonesEdit.length-1;
             return(
               <div key={i} style={{background:"#fff",borderRadius:8,padding:"10px 12px",marginBottom:8,border:`.5px solid ${z.c}`}}>
-                <input value={z.label} onChange={e=>{const nz=[...zonesEdit];nz[i]={...nz[i],label:e.target.value};setZonesEdit(nz);}} style={{fontSize:12,padding:"7px 10px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:6,display:"block"}}/>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <div style={{width:10,height:10,borderRadius:2,background:z.bg,border:`1.5px solid ${z.c}`,flexShrink:0}}/>
+                  {z.vip&&<span style={{fontSize:10,color:"#B8860B",fontWeight:600}}>★ VIP</span>}
+                  <div style={{flex:1,fontSize:11,color:"#374151",fontWeight:500}}>Zona {i+1}</div>
+                </div>
+                <input
+                  value={z.label}
+                  onChange={e=>{const nz=[...zonesEdit];nz[i]={...nz[i],label:e.target.value};setZonesEdit(nz);}}
+                  style={{fontSize:12,padding:"7px 10px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:6,display:"block"}}
+                  placeholder="Nombre del grupo"
+                />
                 <div style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
-                  <span style={{color:"#6b7280"}}>N° {desde} hasta</span>
-                  {isLast?<span style={{color:"#9ca3af",fontStyle:"italic"}}>fin</span>:<input type="number" value={z.hasta} onChange={e=>{const nz=[...zonesEdit];nz[i]={...nz[i],hasta:+e.target.value||z.hasta};setZonesEdit(nz);}} style={{fontSize:14,padding:"6px 10px",border:".5px solid #185FA5",borderRadius:6,width:80,textAlign:"center"}}/>}
+                  <span style={{color:"#6b7280",flexShrink:0}}>N° {desde} hasta</span>
+                  {isLast?(
+                    <span style={{color:"#9ca3af",fontStyle:"italic"}}>fin del listado</span>
+                  ):(
+                    <input
+                      type="number"
+                      value={z.hasta}
+                      min={desde}
+                      onChange={e=>{const nz=[...zonesEdit];nz[i]={...nz[i],hasta:+e.target.value||z.hasta};setZonesEdit(nz);}}
+                      style={{fontSize:14,padding:"6px 10px",border:".5px solid #185FA5",borderRadius:6,width:80,textAlign:"center",fontWeight:600,color:"#185FA5"}}
+                    />
+                  )}
+                  <span style={{color:"#9ca3af",fontSize:11}}>
+                    {!isLast&&`→ filas ${Math.floor((desde-1)/16)+2}-${Math.min(16,Math.floor((z.hasta-1)/16)+2)}`}
+                  </span>
                 </div>
               </div>
             );
           })}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <button onClick={saveZones} style={{padding:"10px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7}}>✓ Guardar</button>
-            <button onClick={()=>setConfigMode(false)} style={{padding:"10px",border:".5px solid #d1d5db",borderRadius:7,background:"#fff"}}>Cancelar</button>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4}}>
+            <button onClick={saveZones} style={{padding:"10px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7,fontSize:13,fontWeight:500}}>✓ Guardar grupos</button>
+            <button onClick={()=>{setConfigMode(false);setZonesEdit(null);}} style={{padding:"10px",border:".5px solid #d1d5db",borderRadius:7,fontSize:13,background:"#fff"}}>Cancelar</button>
           </div>
         </div>
       )}
@@ -726,21 +793,38 @@ function Admin({items,zones,persist,toggleF,delRec,editId,setEditId,addMode,setA
       {addMode&&(
         <div style={{background:"#f9fafb",borderRadius:10,padding:12,marginBottom:10,border:".5px solid #d1d5db"}}>
           <div style={{fontSize:12,fontWeight:500,marginBottom:8}}>Nuevo registro</div>
-          <input type="text" placeholder="Nombre completo" value={newRec.n} onChange={e=>setNewRec({...newRec,n:e.target.value})} style={{fontSize:13,padding:"8px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:6,display:"block"}}/>
+          <div style={{display:"flex",gap:14,fontSize:12,marginBottom:8,flexWrap:"wrap"}}>
+            <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}><input type="checkbox" checked={newRec.delegacion} onChange={e=>setNewRec({...newRec,delegacion:e.target.checked})}/> Es delegación</label>
+            <label style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}><input type="checkbox" checked={newRec.reservado} onChange={e=>setNewRec({...newRec,reservado:e.target.checked})}/> Es reservado</label>
+          </div>
           {!newRec.delegacion&&<input type="number" placeholder="N° de protocolo" value={newRec.num} onChange={e=>setNewRec({...newRec,num:e.target.value})} style={{fontSize:13,padding:"8px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:6,display:"block"}}/>}
+          <input type="text" placeholder="Nombre completo" value={newRec.n} onChange={e=>setNewRec({...newRec,n:e.target.value})} style={{fontSize:13,padding:"8px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:6,display:"block"}}/>
+          <input type="text" placeholder="Observaciones (opcional)" value={newRec.obs} onChange={e=>setNewRec({...newRec,obs:e.target.value})} style={{fontSize:13,padding:"8px",border:".5px solid #d1d5db",borderRadius:6,width:"100%",marginBottom:8,display:"block"}}/>
+          {!newRec.reservado&&<div style={{display:"flex",gap:14,fontSize:12,marginBottom:10}}>
+            {[{k:"ok",l:"Confirmado"},{k:"ac",l:"Con cónyuge"}].map(({k,l})=>(
+              <label key={k} style={{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}}><input type="checkbox" checked={newRec[k]} onChange={e=>setNewRec({...newRec,[k]:e.target.checked})}/>{l}</label>
+            ))}
+          </div>}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
-            <button onClick={addRecord} style={{padding:"9px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7}}>Guardar</button>
-            <button onClick={()=>setAddMode(false)} style={{padding:"9px",border:".5px solid #d1d5db",borderRadius:7,background:"#fff"}}>Cancelar</button>
+            <button onClick={addRecord} style={{padding:"9px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7,fontSize:13,fontWeight:500}}>Guardar</button>
+            <button onClick={()=>setAddMode(false)} style={{padding:"9px",border:".5px solid #d1d5db",borderRadius:7,fontSize:13,background:"#fff"}}>Cancelar</button>
           </div>
         </div>
       )}
 
       {importMode&&(
         <div style={{background:"#f9fafb",borderRadius:10,padding:12,marginBottom:10,border:".5px solid #d1d5db"}}>
-          <textarea value={importTxt} onChange={e=>setImportTxt(e.target.value)} rows={5} placeholder="1. Nombre" style={{width:"100%",fontSize:12,fontFamily:"monospace"}}/>
-          <button onClick={handleImport} style={{width:"100%",padding:"9px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7,marginTop:5}}>Importar</button>
+          <div style={{fontSize:12,fontWeight:500,marginBottom:4}}>Importar lista completa</div>
+          <div style={{fontSize:11,color:"#9ca3af",marginBottom:8}}>⚠ Reemplaza toda la lista numerada. Reservados y delegaciones se conservan.<br/>Si una línea dice <strong>RESERVADO</strong>, se marca automáticamente como asiento reservado.<br/>Formato: <code style={{background:"#eee",padding:"1px 4px",borderRadius:3}}>1. CA Federico Saelzer Concha</code></div>
+          <textarea value={importTxt} onChange={e=>setImportTxt(e.target.value)} rows={7} placeholder={"1. CA Federico Saelzer Concha\n2. CA Edgardo Acevedo Pérez\n...\n29. RESERVADO\n30. RESERVADO\n..."} style={{width:"100%",fontSize:12,padding:"8px",fontFamily:"monospace",resize:"vertical",border:".5px solid #d1d5db",borderRadius:6,display:"block"}}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:8}}>
+            <button onClick={handleImport} style={{padding:"9px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7,fontSize:13,fontWeight:500}}>Importar</button>
+            <button onClick={()=>setImportMode(false)} style={{padding:"9px",border:".5px solid #d1d5db",borderRadius:7,fontSize:13,background:"#fff"}}>Cancelar</button>
+          </div>
         </div>
       )}
+
+      <button onClick={resetData} style={{width:"100%",padding:"8px",border:".5px solid #e5e7eb",borderRadius:8,fontSize:12,color:"#9ca3af",marginBottom:14,background:"#fff"}}>↺ Restaurar datos de referencia</button>
 
       {res.length>0&&<SecLista titulo={`🔒 Asientos reservados (${res.length})`} tc="#A32D2D" tb="#fef2f2" items={res} editId={editId} setEditId={setEditId} toggleF={toggleF} delRec={delRec} allItems={items} persist={persist}/>}
       {vips.length>0&&<SecLista titulo={`★ VIP — Autoridades (${vips.length})`} tc="#B8860B" tb="#FAEEDA" items={vips} editId={editId} setEditId={setEditId} toggleF={toggleF} delRec={delRec} allItems={items} persist={persist}/>}
@@ -757,17 +841,21 @@ function SecLista({titulo,tc,tb,items,editId,setEditId,toggleF,delRec,allItems,p
       {items.map(inv=>{
         const l=getLoc(inv);
         if(editId===inv.id)return<FilaEdit key={inv.id} inv={inv} allItems={allItems} persist={persist} onClose={()=>setEditId(null)}/>;
-        const locStr=inv.reservado?`Fila ${l.rn} · Grp ${l.gr} · A°${l.as}`:l.type==="delegacion"?`${l.zone?.label}`:l.type==="normal"?`Fila ${l.rn} · Grp ${l.gr}${l.isVip?` · A°${l.as}`:""}`:"-";
+        const locStr=inv.reservado?`Fila ${l.rn} · Grp ${l.gr} · A°${l.as}`:
+          l.type==="delegacion"?`${l.zone?.label||"Sub/Deleg"}`:
+          l.type==="normal"?`Fila ${l.rn} · Grp ${l.gr}${l.isVip?` · A°${l.as}`:""}`:"-";
         return(
-          <div key={inv.id} style={{background:inv.reservado?"#fef2f2":"#fff",border:`.5px solid ${inv.reservado?"#fca5a5":"#e5e7eb"}`,borderRadius:7,padding:"8px 10px",marginBottom:3,display:"flex",alignItems:"center",gap:8}}>
+          <div key={inv.id} style={{background:inv.reservado?"#fef2f2":"#fff",border:`.5px solid ${inv.reservado?"#fca5a5":!inv.ok&&l.isVip&&!inv.reservado?"#fcd34d":"#e5e7eb"}`,borderRadius:7,padding:"8px 10px",marginBottom:3,display:"flex",alignItems:"center",gap:8}}>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:500,color:inv.reservado?"#A32D2D":"#111"}}>{inv.reservado?"🔒 ":l.isVip?"★ ":""}{inv.n}</div>
-              <div style={{fontSize:10,color:"#9ca3af"}}>{locStr} · <span style={{color:inv.ok?"#0F6E56":"#B8860B"}}>{inv.ok?"✓ Conf":"Pend"}</span></div>
+              <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:inv.reservado?"#A32D2D":"#111"}}>
+                {inv.reservado?"🔒 ":l.isVip?"★ ":""}{inv.n}
+              </div>
+              <div style={{fontSize:10,color:"#9ca3af"}}>{locStr}{inv.num>0?` · #${inv.num}`:""} · <span style={{color:inv.reservado?"#A32D2D":inv.ok?"#0F6E56":"#B8860B"}}>{inv.reservado?"Bloqueado":inv.ok?"✓":"Pend."}</span>{inv.ac?" · 👫":""}</div>
             </div>
-            <div style={{display:"flex",gap:3}}>
-              {!inv.reservado&&<button onClick={()=>toggleF(inv.id,"ok")} style={{padding:"4px 7px",borderRadius:6,background:inv.ok?"#E1F5EE":"#fff",color:inv.ok?"#0F6E56":"#9ca3af",border:".5px solid #e5e7eb"}}>{inv.ok?"✓":"○"}</button>}
-              <button onClick={()=>setEditId(inv.id)} style={{padding:"4px 7px",border:".5px solid #e5e7eb",borderRadius:6}}>✏️</button>
-              <button onClick={()=>delRec(inv.id)} style={{padding:"4px 7px",border:".5px solid #e5e7eb",borderRadius:6,color:"#A32D2D"}}>✕</button>
+            <div style={{display:"flex",gap:3,flexShrink:0}}>
+              {!inv.reservado&&<button onClick={()=>toggleF(inv.id,"ok")} style={{padding:"4px 7px",border:".5px solid #e5e7eb",borderRadius:6,fontSize:11,background:inv.ok?"#E1F5EE":"#fff",color:inv.ok?"#0F6E56":"#9ca3af"}}>{inv.ok?"✓":"○"}</button>}
+              <button onClick={()=>setEditId(inv.id)} style={{padding:"4px 7px",border:".5px solid #e5e7eb",borderRadius:6,fontSize:11}}>✏️</button>
+              <button onClick={()=>delRec(inv.id)} style={{padding:"4px 7px",border:".5px solid #e5e7eb",borderRadius:6,fontSize:11,color:"#A32D2D"}}>✕</button>
             </div>
           </div>
         );
@@ -781,16 +869,17 @@ function FilaEdit({inv,allItems,persist,onClose}){
   const save=()=>{persist(allItems.map(d=>d.id===inv.id?{...f,num:f.delegacion?0:+f.num||inv.num}:d));onClose();};
   return(
     <div style={{background:"#f9fafb",border:".5px solid #d1d5db",borderRadius:8,padding:10,marginBottom:4}}>
-      <input value={f.n} onChange={e=>setF({...f,n:e.target.value})} style={{fontSize:12,padding:"6px",width:"100%",marginBottom:6,display:"block"}}/>
-      {!f.delegacion&&<input type="number" value={f.num||""} onChange={e=>setF({...f,num:e.target.value})} style={{fontSize:12,padding:"6px",width:"100%",marginBottom:6,display:"block"}}/>}
-      <div style={{display:"flex",gap:10,fontSize:12,marginBottom:8}}>
-        {[{k:"ok",l:"Confirmado"},{k:"ac",l:"Con cónyuge"}].map(({k,l})=>(
-          <label key={k} style={{display:"flex",alignItems:"center",gap:3}}><input type="checkbox" checked={!!f[k]} onChange={e=>setF({...f,[k]:e.target.checked})}/>{l}</label>
+      {!f.delegacion&&<input type="number" value={f.num||""} onChange={e=>setF({...f,num:e.target.value})} style={{fontSize:12,padding:"6px",border:".5px solid #d1d5db",borderRadius:5,width:"100%",marginBottom:6,display:"block"}} placeholder="N° protocolo"/>}
+      <input value={f.n} onChange={e=>setF({...f,n:e.target.value})} style={{fontSize:12,padding:"6px",border:".5px solid #d1d5db",borderRadius:5,width:"100%",marginBottom:6,display:"block"}}/>
+      <input placeholder="Observaciones" value={f.obs||""} onChange={e=>setF({...f,obs:e.target.value})} style={{fontSize:12,padding:"6px",border:".5px solid #d1d5db",borderRadius:5,width:"100%",marginBottom:6,display:"block"}}/>
+      <div style={{display:"flex",gap:10,fontSize:12,marginBottom:8,flexWrap:"wrap"}}>
+        {[{k:"ok",l:"Confirmado"},{k:"ac",l:"Con cónyuge"},{k:"delegacion",l:"Delegación"},{k:"reservado",l:"Reservado"}].map(({k,l})=>(
+          <label key={k} style={{display:"flex",alignItems:"center",gap:3,cursor:"pointer"}}><input type="checkbox" checked={!!f[k]} onChange={e=>setF({...f,[k]:e.target.checked})}/>{l}</label>
         ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-        <button onClick={save} style={{padding:"7px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7}}>Guardar</button>
-        <button onClick={onClose} style={{padding:"7px",border:".5px solid #d1d5db",borderRadius:7,background:"#fff"}}>Cancelar</button>
+        <button onClick={save} style={{padding:"7px",background:"#0a1f3d",color:"white",border:"none",borderRadius:7,fontSize:12,fontWeight:500}}>Guardar</button>
+        <button onClick={onClose} style={{padding:"7px",border:".5px solid #d1d5db",borderRadius:7,fontSize:12,background:"#fff"}}>Cancelar</button>
       </div>
     </div>
   );
