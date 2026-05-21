@@ -12,7 +12,7 @@ input,textarea,select{font-family:inherit;outline:none}
 </style>
 </head>
 <body>
-<div id="root">Cargando aplicación y conectando con base de datos central...</div>
+<div id="root">Cargando aplicación y enlazando con base de datos central...</div>
 
 <script type="application/json" id="proto-data">
 {"_v":"base","zonesConfig":[
@@ -66,7 +66,7 @@ input,textarea,select{font-family:inherit;outline:none}
 {"id":43,"num":43,"n":"CC LT Felipe Estrada Saa","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":44,"num":44,"n":"CC LT Paul Hudson Gómez","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":45,"num":45,"n":"CC LT Sergio Benítez Prado","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
-{"id":46,"num":46,"n":"CC LT Camila Ovalle Lagos","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
+		{"id": 46, "num": 46, "n": "CC LT Camila Ovalle Lagos", "ok": true, "ac": false, "delegacion": false, "reservado": false, "obs": ""},
 {"id":47,"num":47,"n":"CC OM Raúl Vargas Sandoval","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":48,"num":48,"n":"CC LT José Egaña Cerda","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
 {"id":49,"num":49,"n":"CC Sebastián Vargas Rodríguez","ok":true,"ac":false,"delegacion":false,"reservado":false,"obs":""},
@@ -87,6 +87,7 @@ input,textarea,select{font-family:inherit;outline:none}
 
 <script type="text/babel">
 const {useState,useEffect,useMemo}=React;
+const PIN="2105", LS="proto_21m26_final2";
 
 /* ── CONFIGURACIÓN CENTRALIZADA DE SUPABASE ── */
 const SUPABASE_URL = "https://xukguiohfabhcfxzhwmi.supabase.co"; 
@@ -99,9 +100,15 @@ const supabaseHeaders = {
   "Content-Type": "application/json"
 };
 
-let gZones=[];
-let gData=[];
+/* Capturar fuentes originales antes de que Babel compile nada */
+const _JSX_SRC=(document.querySelector("script[type='text/babel']")||{}).textContent||"";
+const _CSS_SRC=(document.querySelector("style")||{}).textContent||"";
+const _TITLE=(document.querySelector("title")||{}).textContent||"Protocolo";
 
+/* ── zonesConfig global ─────────────── */
+let gZones=[];
+
+/* ── ZONAS POR DEFECTO ──────────────────────────────────────── */
 const DEFAULT_ZONES=[
   {label:"Autoridades civiles y militares",   hasta:32,   c:"#B8860B",bg:"#FAEEDA",vip:true },
   {label:"Of. Superiores · Consejeros · Concejales", hasta:96, c:"#185FA5",bg:"#E6F1FB",vip:false},
@@ -109,10 +116,11 @@ const DEFAULT_ZONES=[
   {label:"Subalternos · Subof. Mayores · Delegaciones",hasta:9999,c:"#5F5E5A",bg:"#F1EFE8",vip:false},
 ];
 
+/* ── UBICACIÓN FÍSICA ───────────────────────────────────────── */
 function getPhys(num){
   const ri=Math.floor((num-1)/16), rn=ri+2;
   const pi=(num-1)%16;
-  const gr=pi%2===0?"B":"A";
+  const gr=pi%2===0?"A":"B";
   const as=Math.floor(pi/2)+1;
   return{rn,gr,as};
 }
@@ -135,32 +143,35 @@ function getLoc(inv){
 function getConjLoc(num){return getLoc({num:num+2,delegacion:false,reservado:false});}
 const norm=s=>(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
 
+let gData=[];
+
 /* ── APP COMPONENT ─────────────────────────────────────────── */
 function App(){
   const [items, setItems] = useState([]);
   const [zones, setZones] = useState(DEFAULT_ZONES);
   const [loading, setLoading] = useState(true);
-  
-  const [tab,setTab]=useState("consultar");
-  const [q,setQ]=useState("");
-  const [sel,setSel]=useState(null);
-  const [pin,setPin]=useState("");
-  const [auth,setAuth]=useState(false);
-  const [pinErr,setPinErr]=useState(false);
-  const [saved,setSaved]=useState("");
-  const [editId,setEditId]=useState(null);
-  const [addMode,setAddMode]=useState(false);
-  const [importMode,setImportMode]=useState(false);
-  const [configMode,setConfigMode]=useState(false);
-  const [importTxt,setImportTxt]=useState("");
-  const [showRes,setShowRes]=useState(false);
-  const [newRec,setNewRec]=useState({num:"",n:"",ok:false,ac:false,delegacion:false,reservado:false,obs:""});
-  const [zonesEdit,setZonesEdit]=useState(null);
 
-  // Sincronizar variables globales requeridas por el motor de cálculo físico externo
+  const[tab,setTab]=useState("consultar");
+  const[q,setQ]=useState("");
+  const[sel,setSel]=useState(null);
+  const[pin,setPin]=useState("");
+  const[auth,setAuth]=useState(false);
+  const[pinErr,setPinErr]=useState(false);
+  const[saved,setSaved]=useState("");
+  
+  // Estado corregido para desambiguar editId de la función setEditId
+  const[editIdState, setEditIdState]=useState(null);
+  const[addMode,setAddMode]=useState(false);
+  const[importMode,setImportMode]=useState(false);
+  const[configMode,setConfigMode]=useState(false);
+  const[importTxt,setImportTxt]=useState("");
+  const[showRes,setShowRes]=useState(false);
+  const[newRec,setNewRec]=useState({num:"",n:"",ok:false,ac:false,delegacion:false,reservado:false,obs:""});
+  const[zonesEdit,setZonesEdit]=useState(null);
+
   useEffect(()=>{gData=items;gZones=zones;},[items,zones]);
 
-  /* ── INTERRUPTOR DE CARGA: CONSULTA A SUPABASE VIA REST API ── */
+  /* ── SCONEXIÓN EN TIEMPO REAL CON SUPABASE ── */
   useEffect(() => {
     async function loadFromCloud() {
       try {
@@ -168,20 +179,19 @@ function App(){
           method: "GET",
           headers: supabaseHeaders
         });
-        if(!response.ok) throw new Error("Error de red de API");
+        if(!response.ok) throw new Error("Fallo de red de API");
         const data = await response.json();
         
         if(data && data.length > 0 && data[0].items && data[0].items.length > 0) {
           setItems(data[0].items);
           setZones(data[0].zones_config || DEFAULT_ZONES);
         } else {
-          // Si la tabla está en blanco en Supabase, poblar con la data por defecto del script HTML
           const emb = JSON.parse(document.getElementById("proto-data").textContent);
           setItems(emb.items);
           setZones(emb.zonesConfig || DEFAULT_ZONES);
         }
       } catch (e) {
-        console.error("Fallo de conexión a Supabase. Activando modo local offline:", e);
+        console.error("Modo local activado por desconexión:", e);
         const emb = JSON.parse(document.getElementById("proto-data").textContent);
         setItems(emb.items);
         setZones(emb.zonesConfig || DEFAULT_ZONES);
@@ -192,7 +202,7 @@ function App(){
     loadFromCloud();
   }, []);
 
-  /* ── CAPA DE PERSISTENCIA SEGURA POR RPC ── */
+  /* ── PERSISTENCIA CENTRALIZADA CON CONTROL DE PIN EN SERVIDOR ── */
   const persist = async (newItems, newZones) => {
     const ni = newItems !== undefined ? newItems : items;
     const nz = newZones !== undefined ? newZones : zones;
@@ -202,12 +212,10 @@ function App(){
       ...ni.filter(x => x.delegacion).sort((a, b) => a.n.localeCompare(b.n))
     ];
     
-    // Renderizado reactivo optimista inmediato en la UI del operador
     setItems(sorted);
     gData = sorted;
     if (newZones !== undefined) { setZones(nz); gZones = nz; }
 
-    // Si no se ha autenticado con PIN, los cambios operan solo localmente
     if (!auth) {
       setSaved("✓ Guardado Local");
       setTimeout(() => setSaved(""), 2000);
@@ -223,23 +231,23 @@ function App(){
           target_id: ROW_ID,
           new_items: sorted,
           new_zones: nz,
-          input_pin: pin // Validación del PIN remota en el motor PostgreSQL
+          input_pin: pin 
         })
       });
 
       if (response.ok) {
         setSaved("✓ Nube Sincronizada");
       } else {
-        const errorDetail = await response.json();
         setSaved("⚠️ Error de PIN");
-        console.error("Rechazo de credencial en el servidor:", errorDetail);
       }
     } catch (err) {
       setSaved("⚠️ Error de Red");
-      console.error("Fallo crítico de conexión:", err);
     }
     setTimeout(() => setSaved(""), 2500);
   };
+
+  const setEditId = (val) => setEditIdState(val);
+  const editId = editIdState;
 
   const results=useMemo(()=>{
     if(!q||q.length<2)return[];
@@ -256,13 +264,9 @@ function App(){
 
   const reservados=useMemo(()=>items.filter(d=>d.reservado),[items]);
 
-  const doLogin=()=>{
-    // Mantenemos validación local visual, pero el RPC lo re-comprobará en backend al escribir
-    if(pin==="2105"){ setAuth(true); setPinErr(false); } else { setPinErr(true); setPin(""); }
-  };
-  
+  const doLogin=()=>{if(pin===PIN){setAuth(true);setPinErr(false);}else setPinErr(true);setPin("");};
   const toggleF=(id,f)=>persist(items.map(d=>d.id===id?{...d,[f]:!d[f]}:d));
-  const delRec=(id)=>{if(confirm("¿Eliminar registro?")) persist(items.filter(d=>d.id!==id));};
+  const delRec=(id)=>{if(confirm("¿Eliminar?"))persist(items.filter(d=>d.id!==id));};
 
   const addRecord=()=>{
     if(!newRec.n.trim()){alert("Ingrese el nombre.");return;}
@@ -292,32 +296,53 @@ function App(){
     alert(`✓ ${added.length} registros importados.\nReservados y delegaciones conservados.`);
   };
 
-  const saveZones=()=>{ persist(undefined,zonesEdit); setConfigMode(false); setZonesEdit(null); };
+  const saveZones=()=>{
+    persist(undefined,zonesEdit);
+    setConfigMode(false);setZonesEdit(null);
+  };
 
   function exportHTMLlocal(){
-    const el=document.getElementById("proto-data");
-    if(!el)return;
-    const orig=el.textContent;
     try{
-      const payload={_v:"exp_"+Date.now(),zonesConfig:zones,items:items};
-      el.textContent="\n"+JSON.stringify(payload)+"\n";
-      const html="<!DOCTYPE html>\n"+document.documentElement.outerHTML;
-      el.textContent=orig;
-      const blob=new Blob([html],{type:"text/html;charset=utf-8"});
+      const payload=JSON.stringify({_v:"exp_"+Date.now(),zonesConfig:zones,items:items});
+      const sc="<"+"script", esc="<"+"/"+"script"+">";
+      const lines=[
+        "<!DOCTYPE html>",
+        '<html lang="es">',
+        "<head>",
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">',
+        "<title>"+_TITLE+"</title>",
+        "<style>"+_CSS_SRC+"</style>",
+        "</head>",
+        "<body>",
+        '<div id="root">Cargando...</div>',
+        sc+' type="application/json" id="proto-data">\n'+payload+"\n"+esc,
+        sc+' src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js">'+esc,
+        sc+' src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js">'+esc,
+        sc+' src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js">'+esc,
+        sc+' type="text/babel">\n'+_JSX_SRC+"\n"+esc,
+        "</body>",
+        "</html>"
+      ];
+      const exportedHtml=lines.join("\n");
+      const blob=new Blob([exportedHtml],{type:"text/html;charset=utf-8"});
       const url=URL.createObjectURL(blob);
       const a=document.createElement("a");
-      a.href=url;a.download="Protocolo_Misa_21Mayo_2026.html";
+      a.href=url;
+      a.download="Protocolo_Misa_21Mayo_2026.html";
       document.body.appendChild(a);a.click();
-      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},200);
-    }catch(e){alert("Error al exportar: "+e.message);}
+      setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},300);
+    }catch(e){
+      alert("Error al exportar: "+e.message);
+    }
   }
 
   if (loading) {
     return (
       <div style={{fontFamily:"system-ui,sans-serif",maxWidth:480,margin:"100px auto",textAlign:"center",color:"#0a1f3d"}}>
         <div style={{fontSize:40,marginBottom:20}}>⚓</div>
-        <div style={{fontSize:16,fontWeight:500}}>Cargando Protocolo en Tiempo Real...</div>
-        <div style={{fontSize:12,color:"#6b7280",marginTop:8}}>Conectando con servidores de Supabase</div>
+        <div style={{fontSize:16,fontWeight:500}}>Cargando Estructura de Protocolo...</div>
+        <div style={{fontSize:12,color:"#6b7280",marginTop:8}}>Sincronizando con base de datos en Supabase</div>
       </div>
     );
   }
@@ -360,14 +385,14 @@ function App(){
             {pinErr&&<div style={{color:"#A32D2D",fontSize:13,marginTop:8}}>PIN incorrecto</div>}
           </div>
         ):(
-          <Admin items={items} zones={zones} persist={persist} toggleF={toggleF} delRec={delRec} editId={editId} setEditId={setEditId} addMode={addMode} setAddMode={setAddMode} importMode={importMode} setImportMode={setImportMode} configMode={configMode} setConfigMode={setConfigMode} importTxt={importTxt} setImportTxt={setImportTxt} handleImport={handleImport} newRec={newRec} setNewRec={setNewRec} addRecord={addRecord} setAuth={setAuth} zonesEdit={zonesEdit} setZonesEdit={setZonesEdit} saveZones={saveZones} exportHTML={exportHTMLlocal} resetData={()=>{if(confirm("¿Restaurar datos locales del HTML?")){{const d=JSON.parse(document.getElementById("proto-data").textContent);persist(d.items,d.zonesConfig||DEFAULT_ZONES);}}}}/>
+          <Admin items={items} zones={zones} persist={persist} toggleF={toggleF} delRec={delRec} editId={editId} setEditId={setEditId} addMode={addMode} setAddMode={setAddMode} importMode={importMode} setImportMode={setImportMode} configMode={configMode} setConfigMode={setConfigMode} importTxt={importTxt} setImportTxt={setImportTxt} handleImport={handleImport} newRec={newRec} setNewRec={setNewRec} addRecord={addRecord} setAuth={setAuth} zonesEdit={zonesEdit} setZonesEdit={setZonesEdit} saveZones={saveZones} exportHTML={exportHTMLlocal} resetData={()=>{if(confirm("¿Restaurar datos de referencia?")){{const d=JSON.parse(document.getElementById("proto-data").textContent);persist(d.items,d.zonesConfig||DEFAULT_ZONES);}}}}/>
         ))}
       </div>
     </div>
   );
 }
 
-/* ── COMPONENTES COMPLEMENTARIOS (CONSERVADOS) ──────────────── */
+/* ── CONSULTAR ──────────────────────────────────────────────── */
 function Consultar({q,setQ,sel,setSel,results,items,reservados,showRes,setShowRes}){
   const active=sel||(results.length===1?results[0]:null);
   return(
@@ -432,6 +457,7 @@ function Consultar({q,setQ,sel,setSel,results,items,reservados,showRes,setShowRe
   );
 }
 
+/* ── TARJETA ────────────────────────────────────────────────── */
 function Tarjeta({inv,items,onBack,showBack}){
   const l=getLoc(inv);
   const cL=(l.isVip&&inv.ac&&!inv.reservado)?getConjLoc(inv.num):null;
@@ -466,7 +492,7 @@ function Tarjeta({inv,items,onBack,showBack}){
           <UbicBox rn={l.rn} gr={l.gr} as={l.as} c="#A32D2D" bg="#fef2f2"/>
           <div style={{background:"#fff",borderRadius:8,padding:"9px 12px",fontSize:12,color:"#A32D2D",border:".5px solid #fca5a5"}}>⚠ No asignar sin autorización del Oficial de Protocolo (T1 AB Jonathan Castro Ruiz).</div>
           {inv.obs&&<div style={{marginTop:8,fontSize:12,color:"#6b7280"}}>📝 {inv.obs}</div>}
-          {l.rn&&<MiniMap rn={l.rn} gr={gr=>(l.gr)}/> }
+          {l.rn&&<MiniMap rn={l.rn} gr={l.gr}/>}
         </div>
       )}
 
@@ -520,6 +546,7 @@ function Tarjeta({inv,items,onBack,showBack}){
   );
 }
 
+/* ── MINI MAPA ──────────────────────────────────────────────── */
 function MiniMap({rn,gr}){
   return(
     <div style={{marginTop:12}}>
@@ -554,6 +581,7 @@ function MiniMap({rn,gr}){
   );
 }
 
+/* ── MAPA COMPLETO ──────────────────────────────────────────── */
 function Mapa({items,zones}){
   const occ={};
   items.filter(d=>!d.delegacion&&d.num>=1&&getLoc(d).isVip).forEach(d=>{
@@ -646,6 +674,7 @@ function Mapa({items,zones}){
   );
 }
 
+/* ── ADMIN ──────────────────────────────────────────────────── */
 function Admin({items,zones,persist,toggleF,delRec,editId,setEditId,addMode,setAddMode,importMode,setImportMode,configMode,setConfigMode,importTxt,setImportTxt,handleImport,newRec,setNewRec,addRecord,setAuth,zonesEdit,setZonesEdit,saveZones,exportHTML,resetData}){
   const res=items.filter(d=>d.reservado);
   const vips=items.filter(d=>!d.delegacion&&!d.reservado&&getLoc(d).isVip);
